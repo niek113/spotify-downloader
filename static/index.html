@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Downloader</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Spotify Downloader</h1>
+            <p class="subtitle">Download playlists via Soulseek in high quality</p>
+        </header>
+
+        <div class="input-section">
+            <div class="input-row">
+                <input
+                    type="text"
+                    id="playlist-url"
+                    placeholder="Paste Spotify playlist URL..."
+                    autocomplete="off"
+                >
+                <button id="download-btn" onclick="submitPlaylist()">Download</button>
+            </div>
+            <div id="error-msg" class="error-msg hidden"></div>
+        </div>
+
+        <div id="job-info" class="job-info hidden">
+            <h2 id="playlist-name"></h2>
+            <div class="stats">
+                <span id="stats-total"></span>
+                <span id="stats-complete" class="stat-complete"></span>
+                <span id="stats-failed" class="stat-failed"></span>
+            </div>
+            <div class="progress-bar-container">
+                <div id="overall-progress" class="progress-bar"></div>
+            </div>
+            <div id="job-controls" class="job-controls hidden">
+                <button id="stop-btn" class="control-btn stop-btn" onclick="stopJob()">Stop</button>
+                <button id="resume-btn" class="control-btn resume-btn hidden" onclick="resumeJob()">Resume</button>
+            </div>
+        </div>
+
+        <div id="track-table-wrapper" class="hidden">
+            <table id="track-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Title</th>
+                        <th>Artist</th>
+                        <th>Album</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                    </tr>
+                </thead>
+                <tbody id="track-tbody"></tbody>
+            </table>
+        </div>
+
+        <div id="health-status" class="health-status">
+            <span id="health-dot" class="health-dot"></span>
+            <span id="health-text">Checking connection...</span>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
