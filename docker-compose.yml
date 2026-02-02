@@ -5,6 +5,9 @@ services:
     image: slskd/slskd:latest
     container_name: slskd
     restart: unless-stopped
+    network_mode: synobridge
+    env_file:
+      - /volume1/docker/slskd/slskd-config/.env
     ports:
       - "5030:5030"
     environment:
@@ -20,18 +23,22 @@ services:
     image: niek113/spotify-downloader:latest
     container_name: spotify-downloader
     restart: unless-stopped
+    network_mode: synobridge
+    env_file:
+      - /volume1/docker/slskd/slskd-config/.env
     ports:
       - "1337:1337"
     environment:
-      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
-      - SLSKD_HOST=http://slskd:5030
-      - SLSKD_API_KEY=${SLSKD_API_KEY}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - SLSKD_HOST=${SLSKD_HOST:-http://slskd:5030}
+      - SLSKD_API_KEY=${SLSKD_API_KEY:-}
       - SLSKD_DOWNLOAD_DIR=/slskd-downloads
       - DOWNLOAD_DIR=/output
     volumes:
       - shared-downloads:/slskd-downloads
       - output-downloads:/output
+      - app-config:/config
     depends_on:
       - slskd
 
@@ -41,4 +48,6 @@ volumes:
   shared-downloads:
     driver: local
   output-downloads:
+    driver: local
+  app-config:
     driver: local

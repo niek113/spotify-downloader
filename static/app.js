@@ -259,6 +259,24 @@ async function loadExistingJobs() {
     }
 }
 
+// Check if configured
+async function checkConfigured() {
+    try {
+        const resp = await fetch("/api/config");
+        const data = await resp.json();
+        const banner = document.getElementById("setup-banner");
+        if (!data.configured) {
+            banner.classList.remove("hidden");
+            document.getElementById("download-btn").disabled = true;
+        } else {
+            banner.classList.add("hidden");
+            document.getElementById("download-btn").disabled = false;
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
 // Health check on load
 async function checkHealth() {
     const dot = document.getElementById("health-dot");
@@ -266,7 +284,10 @@ async function checkHealth() {
     try {
         const resp = await fetch("/api/health");
         const data = await resp.json();
-        if (data.slskd_connected) {
+        if (data.status === "not_configured") {
+            dot.className = "health-dot";
+            text.textContent = "Not configured";
+        } else if (data.slskd_connected) {
             dot.className = "health-dot ok";
             text.textContent = "slskd connected";
         } else {
@@ -284,6 +305,7 @@ document.getElementById("playlist-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitPlaylist();
 });
 
+checkConfigured();
 checkHealth();
 setInterval(checkHealth, 30000);
 loadExistingJobs();
