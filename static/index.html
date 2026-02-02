@@ -7,7 +7,110 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
+    <!-- Onboarding / Settings overlay -->
+    <div id="overlay" class="overlay hidden">
+        <div class="overlay-card">
+            <div id="wizard">
+                <!-- Step indicators -->
+                <div class="wizard-steps">
+                    <div class="wizard-step active" data-step="1">
+                        <div class="step-dot">1</div>
+                        <span>Spotify</span>
+                    </div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step" data-step="2">
+                        <div class="step-dot">2</div>
+                        <span>slskd</span>
+                    </div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step" data-step="3">
+                        <div class="step-dot">3</div>
+                        <span>Connect</span>
+                    </div>
+                </div>
+
+                <!-- Step 1: Spotify -->
+                <div class="wizard-panel" id="step-1">
+                    <h2>Connect Spotify</h2>
+                    <p class="wizard-desc">Enter your Spotify API credentials to fetch playlist data.</p>
+
+                    <div class="form-group">
+                        <label for="spotify_client_id">Client ID</label>
+                        <input type="text" id="spotify_client_id" placeholder="e.g. 8331c05962ab422495f02c3e81ebaba9" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="spotify_client_secret">Client Secret</label>
+                        <input type="password" id="spotify_client_secret" placeholder="Enter your client secret..." autocomplete="off">
+                    </div>
+                    <p class="form-hint">Get your credentials from the <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a></p>
+
+                    <div class="wizard-nav">
+                        <div></div>
+                        <button class="btn-primary" onclick="wizardNext(1)">Next</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: slskd -->
+                <div class="wizard-panel hidden" id="step-2">
+                    <h2>Connect slskd</h2>
+                    <p class="wizard-desc">Enter your slskd API key to search and download from Soulseek.</p>
+
+                    <div class="form-group">
+                        <label for="slskd_api_key">API Key</label>
+                        <input type="password" id="slskd_api_key" placeholder="Enter your slskd API key..." autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="slskd_host">Host <span class="optional">(optional)</span></label>
+                        <input type="text" id="slskd_host" placeholder="http://slskd:5030" autocomplete="off">
+                        <span class="form-hint">Leave empty for default</span>
+                    </div>
+
+                    <div class="wizard-nav">
+                        <button class="btn-secondary" onclick="wizardBack(2)">Back</button>
+                        <button class="btn-primary" onclick="wizardNext(2)">Next</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Test & Save -->
+                <div class="wizard-panel hidden" id="step-3">
+                    <div id="connect-testing">
+                        <div class="connect-icon">
+                            <div class="spinner"></div>
+                        </div>
+                        <h2>Connecting...</h2>
+                        <p class="wizard-desc">Saving your settings and testing the connection.</p>
+                    </div>
+
+                    <div id="connect-success" class="hidden">
+                        <div class="connect-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#1db954" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <h2>All set!</h2>
+                        <p class="wizard-desc">You're connected and ready to download playlists.</p>
+                        <button class="btn-primary" onclick="closeOverlay()" style="margin-top:20px">Start Downloading</button>
+                    </div>
+
+                    <div id="connect-error" class="hidden">
+                        <div class="connect-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e74c3c" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        </div>
+                        <h2>Connection failed</h2>
+                        <p class="wizard-desc" id="connect-error-msg"></p>
+                        <div class="wizard-nav" style="margin-top:20px">
+                            <button class="btn-secondary" onclick="wizardBack(3)">Back</button>
+                            <button class="btn-primary" onclick="wizardNext(2)">Retry</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Close button (only in settings mode) -->
+            <button id="overlay-close" class="overlay-close hidden" onclick="closeOverlay()">&times;</button>
+        </div>
+    </div>
+
+    <!-- Main app -->
+    <div class="container" id="main-app">
         <header>
             <h1>Spotify Downloader</h1>
             <p class="subtitle">Download playlists via Soulseek in high quality</p>
@@ -58,11 +161,10 @@
             </table>
         </div>
 
-        <div id="setup-banner" class="status-banner error hidden">
-            Not configured yet. <a href="/settings" style="color:#e74c3c;font-weight:600">Go to Settings</a> to enter your API keys.
-        </div>
-
-        <a href="/settings" class="settings-link">Settings</a>
+        <button class="settings-link" onclick="openSettings()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
+        </button>
 
         <div id="health-status" class="health-status">
             <span id="health-dot" class="health-dot"></span>

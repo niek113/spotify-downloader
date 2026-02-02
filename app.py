@@ -9,7 +9,7 @@ logging.basicConfig(
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 from config import Settings, get_settings, save_config, load_saved_config, is_configured
@@ -69,7 +69,7 @@ async def index():
 
 @app.get("/settings")
 async def settings_page():
-    return FileResponse("static/settings.html")
+    return RedirectResponse("/")
 
 
 @app.get("/api/config")

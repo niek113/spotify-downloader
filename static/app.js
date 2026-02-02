@@ -1,6 +1,160 @@
 let currentJobId = null;
 let ws = null;
 let pollInterval = null;
+let isOnboarding = false;
+
+// ─── Onboarding / Settings Wizard ───
+
+async function checkConfigured() {
+    try {
+        const resp = await fetch("/api/config");
+        const data = await resp.json();
+        if (!data.configured) {
+            openOnboarding();
+        }
+        return data;
+    } catch (e) {
+        return null;
+    }
+}
+
+function openOnboarding() {
+    isOnboarding = true;
+    document.getElementById("overlay-close").classList.add("hidden");
+    showOverlay();
+    goToStep(1);
+}
+
+function openSettings() {
+    isOnboarding = false;
+    document.getElementById("overlay-close").classList.remove("hidden");
+    showOverlay();
+    goToStep(1);
+    loadConfigIntoForm();
+}
+
+function showOverlay() {
+    document.getElementById("overlay").classList.remove("hidden");
+}
+
+function closeOverlay() {
+    document.getElementById("overlay").classList.add("hidden");
+    checkHealth();
+    loadExistingJobs();
+}
+
+async function loadConfigIntoForm() {
+    try {
+        const resp = await fetch("/api/config");
+        const data = await resp.json();
+        document.getElementById("spotify_client_id").value = data.spotify_client_id || "";
+        document.getElementById("slskd_host").value =
+            (data.slskd_host && data.slskd_host !== "http://localhost:5030") ? data.slskd_host : "";
+        if (data.spotify_client_secret) {
+            document.getElementById("spotify_client_secret").placeholder = data.spotify_client_secret;
+        }
+        if (data.slskd_api_key) {
+            document.getElementById("slskd_api_key").placeholder = data.slskd_api_key;
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function goToStep(step) {
+    // Update step indicators
+    document.querySelectorAll(".wizard-step").forEach(el => {
+        const s = parseInt(el.dataset.step);
+        el.classList.remove("active", "done");
+        if (s === step) el.classList.add("active");
+        else if (s < step) el.classList.add("done");
+    });
+
+    // Show/hide panels
+    for (let i = 1; i <= 3; i++) {
+        const panel = document.getElementById(`step-${i}`);
+        if (i === step) panel.classList.remove("hidden");
+        else panel.classList.add("hidden");
+    }
+}
+
+function wizardNext(fromStep) {
+    if (fromStep === 1) {
+        const id = document.getElementById("spotify_client_id").value.trim();
+        const secret = document.getElementById("spotify_client_secret").value.trim();
+        if (!id) {
+            document.getElementById("spotify_client_id").classList.add("input-error");
+            return;
+        }
+        document.getElementById("spotify_client_id").classList.remove("input-error");
+        if (!secret && isOnboarding) {
+            document.getElementById("spotify_client_secret").classList.add("input-error");
+            return;
+        }
+        document.getElementById("spotify_client_secret").classList.remove("input-error");
+        goToStep(2);
+    } else if (fromStep === 2) {
+        const key = document.getElementById("slskd_api_key").value.trim();
+        if (!key && isOnboarding) {
+            document.getElementById("slskd_api_key").classList.add("input-error");
+            return;
+        }
+        document.getElementById("slskd_api_key").classList.remove("input-error");
+        goToStep(3);
+        saveAndConnect();
+    }
+}
+
+function wizardBack(toStep) {
+    if (toStep === 2) goToStep(1);
+    else if (toStep === 3) goToStep(2);
+}
+
+async function saveAndConnect() {
+    // Show testing state
+    document.getElementById("connect-testing").classList.remove("hidden");
+    document.getElementById("connect-success").classList.add("hidden");
+    document.getElementById("connect-error").classList.add("hidden");
+
+    const body = {
+        spotify_client_id: document.getElementById("spotify_client_id").value.trim(),
+        spotify_client_secret: document.getElementById("spotify_client_secret").value.trim(),
+        slskd_api_key: document.getElementById("slskd_api_key").value.trim(),
+        slskd_host: document.getElementById("slskd_host").value.trim(),
+    };
+
+    try {
+        const resp = await fetch("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || "Failed to save configuration");
+        }
+
+        // Test health
+        await new Promise(r => setTimeout(r, 1000));
+        const healthResp = await fetch("/api/health");
+        const health = await healthResp.json();
+
+        document.getElementById("connect-testing").classList.add("hidden");
+
+        if (health.slskd_connected) {
+            document.getElementById("connect-success").classList.remove("hidden");
+        } else {
+            document.getElementById("connect-success").classList.remove("hidden");
+            document.querySelector("#connect-success .wizard-desc").textContent =
+                "Configuration saved! slskd is not reachable yet — it may still be starting up.";
+        }
+    } catch (e) {
+        document.getElementById("connect-testing").classList.add("hidden");
+        document.getElementById("connect-error").classList.remove("hidden");
+        document.getElementById("connect-error-msg").textContent = e.message;
+    }
+}
+
+// ─── Playlist / Jobs ───
 
 async function submitPlaylist() {
     const urlInput = document.getElementById("playlist-url");
@@ -56,29 +210,22 @@ function showError(msg) {
 }
 
 function connectWebSocket(jobId) {
-    if (ws) {
-        ws.close();
-    }
+    if (ws) ws.close();
 
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${protocol}//${location.host}/ws/jobs/${jobId}`);
 
     ws.onmessage = (event) => {
         const job = JSON.parse(event.data);
-        if (job.error) {
-            showError(job.error);
-            return;
-        }
+        if (job.error) { showError(job.error); return; }
         renderJob(job);
     };
 
     ws.onclose = () => {
-        // Fallback: poll once more
         setTimeout(() => pollJob(jobId), 2000);
     };
 
     ws.onerror = () => {
-        // Fallback to polling
         ws.close();
         startPolling(jobId);
     };
@@ -99,9 +246,7 @@ async function pollJob(jobId) {
             clearInterval(pollInterval);
             pollInterval = null;
         }
-    } catch (e) {
-        // ignore
-    }
+    } catch (e) { /* ignore */ }
 }
 
 function renderJob(job) {
@@ -117,11 +262,9 @@ function renderJob(job) {
     const pct = total > 0 ? ((complete + failed) / total) * 100 : 0;
     document.getElementById("overall-progress").style.width = `${pct}%`;
 
-    // Update control buttons based on job status
     updateControls(job.status);
 
     const tbody = document.getElementById("track-tbody");
-    // Build or update rows
     if (tbody.children.length !== tracks.length) {
         tbody.innerHTML = "";
         tracks.forEach((t, i) => {
@@ -176,9 +319,7 @@ async function resumeJob() {
     btn.textContent = "Resuming...";
     try {
         const resp = await fetch(`/api/jobs/${currentJobId}/resume`, { method: "POST" });
-        if (resp.ok) {
-            connectWebSocket(currentJobId);
-        }
+        if (resp.ok) connectWebSocket(currentJobId);
     } catch (e) {
         showError("Failed to resume job");
         btn.disabled = false;
@@ -217,14 +358,9 @@ function buildRowHTML(trackJob, index) {
 
 function formatStatus(status) {
     const map = {
-        pending: "Pending",
-        searching: "Searching",
-        found: "Found",
-        downloading: "Downloading",
-        tagging: "Tagging",
-        complete: "Complete",
-        failed: "Failed",
-        not_found: "Not Found",
+        pending: "Pending", searching: "Searching", found: "Found",
+        downloading: "Downloading", tagging: "Tagging", complete: "Complete",
+        failed: "Failed", not_found: "Not Found",
     };
     return map[status] || status;
 }
@@ -235,49 +371,28 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-// Load existing jobs on page load
+// ─── Load existing jobs ───
+
 async function loadExistingJobs() {
     try {
         const resp = await fetch("/api/jobs");
         if (!resp.ok) return;
         const jobs = await resp.json();
 
-        // Find the most recent running or stopped job
         const activeJob = jobs.find(j => j.status === "running" || j.status === "stopped");
         if (activeJob) {
             showJob(activeJob.job_id, activeJob.playlist_name, activeJob.track_count);
             return;
         }
-
-        // Show most recent completed job if any
         if (jobs.length > 0) {
             const last = jobs[jobs.length - 1];
             showJob(last.job_id, last.playlist_name, last.track_count);
         }
-    } catch (e) {
-        // No existing jobs, that's fine
-    }
+    } catch (e) { /* ignore */ }
 }
 
-// Check if configured
-async function checkConfigured() {
-    try {
-        const resp = await fetch("/api/config");
-        const data = await resp.json();
-        const banner = document.getElementById("setup-banner");
-        if (!data.configured) {
-            banner.classList.remove("hidden");
-            document.getElementById("download-btn").disabled = true;
-        } else {
-            banner.classList.add("hidden");
-            document.getElementById("download-btn").disabled = false;
-        }
-    } catch (e) {
-        // ignore
-    }
-}
+// ─── Health check ───
 
-// Health check on load
 async function checkHealth() {
     const dot = document.getElementById("health-dot");
     const text = document.getElementById("health-text");
@@ -300,7 +415,8 @@ async function checkHealth() {
     }
 }
 
-// Enter key to submit
+// ─── Init ───
+
 document.getElementById("playlist-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitPlaylist();
 });
