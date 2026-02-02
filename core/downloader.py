@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from typing import Optional
 from uuid import uuid4
 
@@ -23,38 +24,85 @@ def sanitize_filename(name: str) -> str:
     return name or "unknown"
 
 
-def score_file(file: dict, response: dict, target_duration_ms: int) -> float:
+def _normalize(text: str) -> str:
+    """Lowercase and strip punctuation for fuzzy matching."""
+    return re.sub(r'[^a-z0-9\s]', '', text.lower()).strip()
+
+
+def _filename_matches(fname: str, artist: str, title: str) -> bool:
+    """Check if the filename plausibly contains the artist and title."""
+    fname_norm = _normalize(fname)
+    artist_norm = _normalize(artist)
+    title_norm = _normalize(title)
+
+    # Title must appear in filename
+    if title_norm not in fname_norm:
+        return False
+
+    # Artist should appear in filename or in the path
+    if artist_norm not in fname_norm:
+        # Check individual artist words (e.g. "Sub Focus" -> "sub", "focus")
+        artist_words = artist_norm.split()
+        if len(artist_words) >= 2:
+            matches = sum(1 for w in artist_words if w in fname_norm)
+            if matches < len(artist_words) * 0.5:
+                return False
+        else:
+            return False
+
+    return True
+
+
+def score_file(
+    file: dict,
+    response: dict,
+    target_duration_ms: int,
+    artist: str = "",
+    title: str = "",
+) -> float:
     score = 0.0
     fname = file.get("filename", "").lower()
 
+    # ── Format & bitrate filter ──
     if fname.endswith(".flac"):
-        score += 90
+        score += 100
     elif fname.endswith(".mp3"):
         bitrate = file.get("bitRate", 0) or 0
         if bitrate >= 320:
-            score += 100
-        elif bitrate >= 256:
-            score += 70
-        elif bitrate >= 192:
-            score += 50
+            score += 90
         elif bitrate > 0:
+            # Reject anything below 320 kbps
             return -1
         else:
-            # Unknown bitrate — allow but score low
-            score += 30
+            # Unknown bitrate — reject to be safe
+            return -1
     else:
         return -1
 
+    # ── Duration match (strict: max 15s deviation) ──
     length_s = file.get("length", 0) or 0
     if length_s and target_duration_ms:
         deviation_ms = abs(length_s * 1000 - target_duration_ms)
-        if deviation_ms > 30000:
+        if deviation_ms > 15000:
             return -1
-        elif deviation_ms < 5000:
-            score += 20
-        elif deviation_ms < 15000:
-            score += 10
+        elif deviation_ms < 3000:
+            score += 30
+        elif deviation_ms < 8000:
+            score += 15
+        else:
+            score += 5
+    elif target_duration_ms:
+        # No length info — penalize heavily
+        score -= 20
 
+    # ── Filename must match artist + title ──
+    if artist and title:
+        # Use full path for matching (includes folder names)
+        full_path = file.get("filename", "")
+        if not _filename_matches(full_path, artist, title):
+            return -1
+
+    # ── Peer quality ──
     if response.get("freeUploadSlots", 0) > 0:
         score += 15
     speed = response.get("uploadSpeed", 0) or 0
@@ -151,10 +199,10 @@ class DownloadOrchestrator:
         track_job.status = TrackStatus.SEARCHING
         logger.info(f"Searching for: {track.artist} - {track.title}")
 
-        # Try search queries in order
+        # Try search queries in order (no title-only fallback to avoid wrong matches)
         queries = [
             f"{track.artist} {track.title}",
-            track.title,
+            f"{track.artist} {track.title} {track.album}",
         ]
 
         best = None
@@ -164,7 +212,7 @@ class DownloadOrchestrator:
                 track_job.search_id = search_id
                 responses = await self.slskd.wait_for_search(search_id, max_wait=45.0)
                 await self.slskd.delete_search(search_id)
-                best = self._select_best_file(responses, track.duration_ms)
+                best = self._select_best_file(responses, track.duration_ms, artist=track.artist, title=track.title)
                 if best is not None:
                     logger.info(f"Found match for '{query}' from user {best[0]}")
                     break
@@ -202,15 +250,9 @@ class DownloadOrchestrator:
 
         # Tag and move file
         track_job.status = TrackStatus.TAGGING
-        ext = self._get_extension(file_info["filename"])
-        output_path = self._build_output_path(job.playlist_name, track, ext)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         source_path = self._find_downloaded_file(username, file_info["filename"])
-        if source_path and os.path.exists(source_path):
-            logger.info(f"Found file at: {source_path}")
-            shutil.copy2(source_path, output_path)
-        else:
+        if not source_path or not os.path.exists(source_path):
             track_job.status = TrackStatus.FAILED
             dir_info = self._debug_list_dir(self.settings.slskd_download_dir)
             track_job.error = (
@@ -221,6 +263,21 @@ class DownloadOrchestrator:
             )
             logger.error(track_job.error)
             return
+
+        logger.info(f"Found file at: {source_path}")
+
+        # Always output as MP3 — convert FLAC to 320kbps MP3
+        output_path = self._build_output_path(job.playlist_name, track, ".mp3")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        if source_path.lower().endswith(".flac"):
+            converted = self._convert_flac_to_mp3(source_path, output_path)
+            if not converted:
+                track_job.status = TrackStatus.FAILED
+                track_job.error = "FLAC to MP3 conversion failed"
+                return
+        else:
+            shutil.copy2(source_path, output_path)
 
         try:
             await self.tagger.tag_file(output_path, track)
@@ -233,13 +290,14 @@ class DownloadOrchestrator:
         logger.info(f"Complete: {track.artist} - {track.title} -> {output_path}")
 
     def _select_best_file(
-        self, responses: list[dict], duration_ms: int
+        self, responses: list[dict], duration_ms: int,
+        artist: str = "", title: str = "",
     ) -> Optional[tuple[str, dict]]:
         candidates: list[tuple[float, str, dict]] = []
         for resp in responses:
             username = resp.get("username", "")
             for f in resp.get("files", []):
-                s = score_file(f, resp, duration_ms)
+                s = score_file(f, resp, duration_ms, artist=artist, title=title)
                 if s > 0:
                     candidates.append((s, username, f))
         if not candidates:
@@ -329,6 +387,36 @@ class DownloadOrchestrator:
         track_job.status = TrackStatus.FAILED
         track_job.error = "Download timed out after 10 minutes"
         return False
+
+    def _convert_flac_to_mp3(self, flac_path: str, mp3_path: str) -> bool:
+        """Convert a FLAC file to 320kbps MP3 using ffmpeg."""
+        try:
+            logger.info(f"Converting FLAC to MP3: {flac_path} -> {mp3_path}")
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", flac_path,
+                    "-codec:a", "libmp3lame",
+                    "-b:a", "320k",
+                    "-map_metadata", "0",
+                    "-id3v2_version", "3",
+                    mp3_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                logger.error(f"ffmpeg error: {result.stderr[:500]}")
+                return False
+            logger.info(f"Conversion complete: {mp3_path}")
+            return True
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg conversion timed out (120s)")
+            return False
+        except Exception as e:
+            logger.error(f"ffmpeg conversion failed: {e}")
+            return False
 
     def _build_output_path(
         self, playlist_name: str, track: TrackInfo, ext: str

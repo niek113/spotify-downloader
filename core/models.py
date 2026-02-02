@@ -23,6 +23,10 @@ class TrackInfo(BaseModel):
     duration_ms: int
     cover_url: str
     spotify_uri: str
+    year: str = ""
+    bpm: Optional[float] = None
+    key: Optional[str] = None          # e.g. "C", "F#m"
+    initial_key: Optional[str] = None  # Camelot notation e.g. "8A", "11B"
 
 
 class TrackJob(BaseModel):

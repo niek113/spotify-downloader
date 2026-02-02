@@ -2,7 +2,7 @@ import io
 
 import httpx
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, APIC, ID3NoHeaderError
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, APIC, TBPM, TKEY, TDRC, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC, Picture
 from PIL import Image
 
@@ -45,6 +45,22 @@ class Tagger:
         tags.add(TPE1(encoding=3, text=[track.artist]))
         tags.add(TALB(encoding=3, text=[track.album]))
         tags.add(TRCK(encoding=3, text=[f"{track.track_number}/{track.total_tracks}"]))
+
+        # Year
+        if track.year:
+            tags.add(TDRC(encoding=3, text=[track.year]))
+
+        # BPM
+        if track.bpm:
+            tags.add(TBPM(encoding=3, text=[str(int(round(track.bpm)))]))
+
+        # Musical key (e.g. "Cm", "F#")
+        if track.key:
+            tags.add(TKEY(encoding=3, text=[track.key]))
+
+        # Camelot key as custom tag (used by Rekordbox, Traktor, etc.)
+        if track.initial_key:
+            tags.add(TXXX(encoding=3, desc="INITIAL_KEY", text=[track.initial_key]))
 
         if cover_data:
             tags.add(APIC(

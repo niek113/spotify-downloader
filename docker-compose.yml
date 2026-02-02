@@ -5,13 +5,12 @@ services:
     image: slskd/slskd:latest
     container_name: slskd
     restart: unless-stopped
-    network_mode: synobridge
     ports:
       - "5030:5030"
     environment:
-      - SLSKD_SLSK_USERNAME=
-      - SLSKD_SLSK_PASSWORD=
-      - SLSKD_API_KEY=
+      - SLSKD_SLSK_USERNAME=${SOULSEEK_USERNAME}
+      - SLSKD_SLSK_PASSWORD=${SOULSEEK_PASSWORD}
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
     volumes:
       - slskd-config:/app/config
       - shared-downloads:/app/downloads
@@ -21,7 +20,6 @@ services:
     image: niek113/spotify-downloader:latest
     container_name: spotify-downloader
     restart: unless-stopped
-    network_mode: synobridge
     ports:
       - "1337:1337"
     environment:
@@ -30,7 +28,7 @@ services:
       - DOWNLOAD_DIR=/output
     volumes:
       - shared-downloads:/slskd-downloads
-      - output-downloads:/output
+      - ~/Music/Spotify-DL:/output
       - app-config:/config
     depends_on:
       - slskd
