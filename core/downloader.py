@@ -288,6 +288,7 @@ class DownloadOrchestrator:
         track_job.output_path = output_path
         track_job.status = TrackStatus.COMPLETE
         logger.info(f"Complete: {track.artist} - {track.title} -> {output_path}")
+        self._synoindex(output_path)
 
     def _select_best_file(
         self, responses: list[dict], duration_ms: int,
@@ -506,3 +507,21 @@ class DownloadOrchestrator:
             if len(files) > 10:
                 results.append(f"{indent}  ... and {len(files) - 10} more")
         return "\n".join(results[:50])
+
+    def _synoindex(self, path: str) -> None:
+        """Notify Synology Drive of a new file via synoindex. No-op if not on Synology."""
+        try:
+            result = subprocess.run(
+                ["synoindex", "-a", path],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                logger.info(f"synoindex: indexed {path}")
+            else:
+                logger.debug(f"synoindex returned {result.returncode}: {result.stderr.strip()}")
+        except FileNotFoundError:
+            logger.debug("synoindex not available (not running on Synology)")
+        except Exception as e:
+            logger.debug(f"synoindex failed: {e}")
