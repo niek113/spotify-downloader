@@ -24,6 +24,20 @@ def sanitize_filename(name: str) -> str:
     return name or "unknown"
 
 
+def _clean_title(title: str) -> str:
+    """Strip common version/mix suffixes that appear on Spotify but not on file-sharing networks."""
+    patterns = [
+        # Parenthetical: (Radio Edit), (Original Mix), (Extended Version), (Club Mix), etc.
+        r'\s*\((radio\s*(edit|mix|version)?|original\s*(mix|version)?|extended\s*(mix|version)?|club\s*(mix|version)?|album\s*version|single\s*version|edit|mix)\)\s*$',
+        # Dash suffix: - Radio Edit, - Radio Mix, - Edit, - Single Version, etc.
+        r'\s*[-–]\s*(radio\s*(edit|mix|version)?|original\s*(mix|version)?|extended\s*(mix|version)?|club\s*(mix|version)?|album\s*version|single\s*version|edit)\s*$',
+    ]
+    cleaned = title
+    for pattern in patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+    return cleaned or title
+
+
 def _normalize(text: str) -> str:
     """Lowercase and strip punctuation for fuzzy matching."""
     return re.sub(r'[^a-z0-9\s]', '', text.lower()).strip()
@@ -199,20 +213,27 @@ class DownloadOrchestrator:
         track_job.status = TrackStatus.SEARCHING
         logger.info(f"Searching for: {track.artist} - {track.title}")
 
-        # Try search queries in order (no title-only fallback to avoid wrong matches)
-        queries = [
-            f"{track.artist} {track.title}",
-            f"{track.artist} {track.title} {track.album}",
+        # Strip Spotify version suffixes (e.g. "- Radio Edit", "(Original Mix)") for searching
+        clean_title = _clean_title(track.title)
+        if clean_title != track.title:
+            logger.info(f"Cleaned title: '{track.title}' -> '{clean_title}'")
+
+        # Try search queries in order; use cleaned title first, fall back to original
+        queries: list[tuple[str, str]] = [
+            (f"{track.artist} {clean_title}", clean_title),
         ]
+        if clean_title != track.title:
+            queries.append((f"{track.artist} {track.title}", track.title))
+        queries.append((f"{track.artist} {clean_title} {track.album}", clean_title))
 
         best = None
-        for query in queries:
+        for query, title_for_matching in queries:
             try:
                 search_id = await self.slskd.search(query, self.settings.search_timeout_ms)
                 track_job.search_id = search_id
                 responses = await self.slskd.wait_for_search(search_id, max_wait=45.0)
                 await self.slskd.delete_search(search_id)
-                best = self._select_best_file(responses, track.duration_ms, artist=track.artist, title=track.title)
+                best = self._select_best_file(responses, track.duration_ms, artist=track.artist, title=title_for_matching)
                 if best is not None:
                     logger.info(f"Found match for '{query}' from user {best[0]}")
                     break
@@ -509,7 +530,25 @@ class DownloadOrchestrator:
         return "\n".join(results[:50])
 
     def _synoindex(self, path: str) -> None:
-        """Notify Synology Drive of a new file via synoindex. No-op if not on Synology."""
+        """Notify Synology of a new file and trigger Drive sync. No-op if not on Synology."""
+        # Touch the file and all parent directories up to DOWNLOAD_DIR.
+        # This updates mtime so Synology Drive's inotify watcher picks up the new file —
+        # without this, Drive may not detect files written from inside a Docker container.
+        try:
+            target = path
+            download_dir = os.path.realpath(self.settings.download_dir)
+            while True:
+                os.utime(target, None)
+                logger.debug(f"Touched for Drive sync: {target}")
+                parent = os.path.dirname(target)
+                if os.path.realpath(parent) == download_dir or parent == target:
+                    os.utime(parent, None)
+                    break
+                target = parent
+        except Exception as e:
+            logger.debug(f"touch for Drive sync failed: {e}")
+
+        # Also notify Synology's media index (for Video Station / Audio Station etc.)
         try:
             result = subprocess.run(
                 ["synoindex", "-a", path],

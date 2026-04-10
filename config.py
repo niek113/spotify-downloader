@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     search_timeout_ms: int = 30000
     min_bitrate: int = 192
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 def load_saved_config() -> dict:

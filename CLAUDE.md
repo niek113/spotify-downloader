@@ -79,5 +79,8 @@ Jobs are in-memory only (lost on restart). Job/track statuses: `pending → sear
 
 - All output is MP3 regardless of source format (FLAC is converted, MP3 is copied as-is)
 - Tags written: title, artist, album, track number, year, BPM, musical key (TKEY), Camelot key (TXXX `INITIAL_KEY`), cover art (600×600 JPEG)
-- File scoring rejects anything that isn't FLAC or 320kbps MP3; duration must be within 15 seconds of Spotify's value; filename must fuzzy-match artist + title
+- File scoring rejects anything that isn't FLAC or 320kbps MP3; duration must be within 15 seconds of Spotify's value; filename must fuzzy-match artist + title. The `MIN_BITRATE` setting is not used — `score_file()` in `downloader.py` hardcodes 320kbps as the minimum for MP3.
 - `SLSKD_DOWNLOAD_DIR` must be the path *inside this container* to the directory where slskd writes files (mapped via Docker volume)
+- After a successful download, `_synoindex()` runs `synoindex -a <path>` to notify Synology DSM's media index; silently no-ops if `synoindex` isn't available
+- Settings resolution order: env vars > `.env` file > `/config/settings.json`. `is_configured()` only requires `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `SLSKD_API_KEY` — `SLSKD_HOST` and `SLSKD_DOWNLOAD_DIR` are optional.
+- There are no automated tests in this project.
